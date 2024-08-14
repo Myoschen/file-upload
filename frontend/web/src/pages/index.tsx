@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import Dropzone from 'react-dropzone'
-import { CheckCircledIcon, TrashIcon, UploadIcon } from '@radix-ui/react-icons'
+import { CheckCircledIcon, CrossCircledIcon, TrashIcon, UploadIcon } from '@radix-ui/react-icons'
 import ky, { type HTTPError } from 'ky'
 import { toast } from 'sonner'
 
@@ -23,6 +23,7 @@ enum Status {
   Idle = 'Idle',
   Uploading = 'Uploading',
   Completed = 'Completed',
+  Failed = 'Failed',
 }
 
 export default function Home() {
@@ -34,7 +35,12 @@ export default function Home() {
   const hasFiles = files.length > 0
 
   const handleOpenChange = (open: boolean) => {
-    if (!open) control.current?.abort()
+    if (!open) {
+      control.current?.abort()
+      setFiles([])
+      setDone(0)
+      setStatus(Status.Idle)
+    }
     setOpen(open)
   }
 
@@ -46,23 +52,23 @@ export default function Home() {
     setFiles(f => f.filter((_, i) => i !== index))
   }
 
-  const handleUpload = async () => {
+  const handleUpload = async (index: number = 0) => {
     try {
       control.current = new AbortController()
       setStatus(Status.Uploading)
-      for (const file of files) {
+      for (const file of files.slice(index)) {
         if (control.current?.signal.aborted) {
+          setStatus(Status.Failed)
           throw Error('Cancelled!')
         }
         const formData = new FormData()
         formData.append('file', file)
         await sleep()
         await api.post('file', { body: formData, signal: control.current.signal }).json<Response>()
-        await sleep()
         toast.success('Upload Successful!')
         setDone(d => d + 1)
       }
-      setStatus(Status.Completed)
+      setTimeout(() => setStatus(Status.Completed), 1500)
     } catch (err) {
       if (err instanceof Error && err.name === 'HTTPError') {
         const resp = await (err as HTTPError).response.json<Response>()
@@ -72,10 +78,11 @@ export default function Home() {
       }
     } finally {
       control.current = null
-      setDone(0)
-      setFiles([])
-      setStatus(Status.Idle)
     }
+  }
+
+  const handleCancel = () => {
+    control.current?.abort()
   }
 
   return (
@@ -120,22 +127,37 @@ export default function Home() {
                     ))}
                   </ScrollArea>
                   <div className="ml-auto">
-                    <Button size="sm" onClick={handleUpload}>Upload</Button>
+                    <Button size="sm" onClick={() => handleUpload()}>Upload</Button>
                   </div>
                 </>
               )}
             </>
           )}
           {status === Status.Uploading && (
-            <div className="flex flex-col items-center gap-y-2 py-20">
+            <div className="flex h-60 flex-col items-center justify-center gap-y-2">
               <Progress value={(done / files.length) * 100} />
               <p className="text-sm font-medium">Uploading...</p>
+              <Button
+                className="absolute bottom-6 right-6"
+                size="sm"
+                onClick={handleCancel}
+                disabled={done === files.length}
+              >
+                Cancel
+              </Button>
             </div>
           )}
           {status === Status.Completed && (
-            <div className="flex flex-col items-center gap-y-2 py-20">
-              <CheckCircledIcon className="size-10" />
+            <div className="flex h-60 flex-col items-center justify-center gap-y-2">
+              <CheckCircledIcon className="size-6" />
               <p className="text-sm font-medium">Upload Successful!</p>
+            </div>
+          )}
+          {status === Status.Failed && (
+            <div className="flex h-60 flex-col items-center justify-center gap-y-2">
+              <CrossCircledIcon className="size-6" />
+              <p className="text-sm font-medium">Upload Failed!</p>
+              <Button className="absolute bottom-6 right-6" size="sm" onClick={() => handleUpload(done)}>Retry</Button>
             </div>
           )}
         </DialogContent>
